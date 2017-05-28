@@ -1,0 +1,1379 @@
+
+<html>
+
+<head>
+
+  <meta charset=utf-8 />
+  <title>India Census</title>
+
+  <script src='https://api.tiles.mapbox.com/mapbox.js/v2.1.5/mapbox.js'></script>
+  <link href='https://api.tiles.mapbox.com/mapbox.js/v2.1.5/mapbox.css' rel='stylesheet' />
+
+	<style>
+
+		body {
+            margin:0; padding:0;
+        }
+
+    	.map {
+            position: absolute;
+            top:0;
+            bottom:0;
+            width: 100%;
+            height: 707px;
+        }
+
+	    .map-legend i {
+	        width: 18px;
+	        height: 18px;
+	        float: left;
+	        margin-right: 8px;
+	        opacity: 0.7;
+	    }
+	    .leaflet-popup-close-button {
+	        display: none;
+	    }
+	    .leaflet-popup-content-wrapper {
+	        pointer-events: none;
+	    }
+
+	    .pie-graph, .bar-graph {
+
+	    	width: 250px;
+	    	height: 250px;
+
+	    	border: thin solid grey;
+            background: black;
+            opacity: 1;
+            text-align: center;
+	    }
+
+        .filter-ui {
+            background: black;
+            color: white;
+            position:absolute;
+            top: 50px;
+            left: 10px;
+            z-index: 100;
+            padding: 10px;
+            border: thin solid grey;
+            border-radius:3px;
+        }
+
+        .census-banner a {
+            background: black;
+            color: #ffd700;
+            position:absolute;
+            top: 303px;
+            left: 0px;
+            z-index: 1;
+            padding: 10px;
+            font-weight: bold;
+            font-size: 24px;
+            border: thin solid grey;
+            text-decoration: none;
+            border-radius:3px;
+        }
+
+        .census-banner a:hover {
+            text-decoration: underline;
+        }
+
+	</style>
+
+</head>
+
+<body>
+
+<div class="census-banner">
+    <p>India Census - 2011</p>
+</div>
+
+<div id='map' class='map'> </div>
+
+<script id="popup-template" type="text/template">
+    <h2>{{state}}</h2>
+    <strong>Capital: </strong>{{capital}} <br>
+    <strong>Population: </strong>{{population}} <br>
+    <strong>Area: </strong>{{area}} square kilometer <br>
+    <strong>Density: {{density}}</strong> people per square kilometer <br>
+    <strong>Growth: </strong>{{growth}} % <br>
+</script>
+
+<!-- <script src="http://d3js.org/d3.v3.min.js" charset="utf-8"></script> -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
+{#<script type="text/javascript" src="/static/js/census-2011.js"></script>#}
+
+<script>
+    L.mapbox.accessToken = 'pk.eyJ1IjoiaW5pdGRvdCIsImEiOiJ3VkkxTldvIn0.7UPZ8q9fgBE70dMV7e0sLw';
+
+    var map = L.mapbox.map('map', 'initdot.ljplbdcp').setView([21.836006, 87.824707], 5),
+        // color reference from color brewer
+        mapBrew = ['rgb(255,255,204)','rgb(217,240,163)','rgb(173,221,142)','rgb(120,198,121)','rgb(65,171,93)','rgb(35,132,67)','rgb(0,90,50)'],
+        // population density range used for choropleth and legend
+        mapRange = [ 5000, 1000, 800, 500, 300, 100, 0 ];
+
+    // map legend for population density
+    var legend = L.mapbox.legendControl( { position: "bottomleft" } ).addLegend( getLegendHTML() ).addTo(map),
+        // popup for displaying state census details
+        popup = new L.Popup({ autoPan: false, className: 'statsPopup' }),
+        // layer for each state feature from geojson
+        statesLayer,
+        closeTooltip;
+
+    // fetch the state geojson data
+    d3.json( "/static/india-states.json", function (statesData) {
+        statesLayer = L.geoJson(statesData,  {
+            style: getStyle,
+            onEachFeature: onEachFeature
+        }).addTo(map);
+    } );
+
+    function getStyle(feature) {
+        return {
+            weight: 2,
+            opacity: 0.1,
+            color: 'black',
+            fillOpacity: 0.85,
+            fillColor: getDensityColor( indiaCensus.states[feature.properties.code].density )
+        };
+    }
+
+    // get color depending on population density value
+    function getDensityColor(d) {
+        var colors = Array.prototype.slice.call(mapBrew).reverse(), // creates a copy of the mapBrew array and reverses it
+             range = mapRange;
+
+        return  d > range[0] ? colors[0] :
+                d > range[1] ? colors[1] :
+                d > range[2] ? colors[2] :
+                d > range[3] ? colors[3] :
+                d > range[4] ? colors[4] :
+                d > range[5] ? colors[5] :
+                colors[6];
+    }
+
+    function onEachFeature(feature, layer) {
+        layer.on({
+            mousemove: mousemove,
+            mouseout: mouseout,
+            //click: zoomToFeature
+        });
+    }
+
+    function mousemove(e) {
+        var layer = e.target;
+
+        var popupData = {
+            state: indiaCensus.states[layer.feature.properties.code].name,
+            density: indiaCensus.states[layer.feature.properties.code].density,
+            area: indiaCensus.states[layer.feature.properties.code].area,
+            growth: indiaCensus.states[layer.feature.properties.code].growth,
+            population: indiaCensus.states[layer.feature.properties.code].population,
+            capital: indiaCensus.states[layer.feature.properties.code].capital.name
+        };
+
+        popup.setLatLng(e.latlng);
+
+        var popContent = L.mapbox.template( d3.select("#popup-template").text() , popupData );
+        popup.setContent( popContent );
+
+        if (!popup._map) popup.openOn(map);
+        window.clearTimeout(closeTooltip);
+
+        // highlight feature
+        layer.setStyle({
+            weight: 2,
+            opacity: 0.3,
+            fillOpacity: 0.9
+        });
+
+        if (!L.Browser.ie && !L.Browser.opera) {
+            layer.bringToFront();
+        }
+        // update the graph with literacy and sex ratio data
+        updateGraph( indiaCensus.states[layer.feature.properties.code] );
+    }
+
+    function mouseout(e) {
+        statesLayer.resetStyle(e.target);
+        closeTooltip = window.setTimeout(function() {
+            // ref: https://www.mapbox.com/mapbox.js/api/v2.1.6/l-map-class/
+            map.closePopup( popup ); // close only the state details popup
+        }, 100);
+    }
+
+    function zoomToFeature(e) {
+        map.fitBounds(e.target.getBounds());
+    }
+
+    function getLegendHTML() {
+        var grades = Array.prototype.slice.call(mapRange).reverse(), // creates a copy of ranges and reverses it
+            labels = [],
+            from, to;
+        // color reference from color brewer
+        var brew = mapBrew;
+
+        for (var i = 0; i < grades.length; i++) {
+            from = grades[i];
+            to = grades[i + 1];
+
+            labels.push(
+                '<i style="background:' + brew[i] + '"></i> ' +
+                from + (to ? '&ndash;' + to : '+'));
+        }
+
+        return '<span>People per square km</span><br>' + labels.join('<br>');
+    }
+
+    // ref: https://www.mapbox.com/mapbox.js/api/v2.1.6/l-icontrol/
+	var PieGraphControl = L.Control.extend({
+        options: {
+			position: 'topright'
+		},
+
+		onAdd: function (map) {
+			// create the control container with a particular class name
+			var container = L.DomUtil.create('div', 'pie-graph');
+			// ... initialize other DOM elements, add listeners, etc.
+			return container;
+		}
+	});
+
+    var BarGraphControl = L.Control.extend({
+        options: {
+            position: 'bottomright'
+        },
+
+        onAdd: function (map) {
+            // create the control container with a particular class name
+            var container = L.DomUtil.create('div', 'bar-graph');
+            // ... initialize other DOM elements, add listeners, etc.
+            return container;
+        }
+    });
+
+    // add the piegraph and bar graph container
+	map.addControl( new PieGraphControl() )
+        .addControl( new BarGraphControl() );
+
+    // START: Pie Graph
+    var width = 250,
+        height = 150,
+        pieColors = {
+            male: "steelblue",
+            female: "pink"
+        };
+
+    var pieName = d3.select(".pie-graph")
+                        .append("div")
+                    .text("Delhi")
+                    .style("color", "white")
+                    .style("font-size", "15px")
+                    .style("font-weight", "bold")
+                    .style("margin", "6px 0");
+
+    // append the svg elements to the graph containers
+    var pieSvg = d3.select(".pie-graph")
+                .append("svg")
+                .attr("id", "pie-graph")
+                .attr("width", width)
+                .attr("height", height)
+                    .append("g")
+                .attr("transform", "translate(" + width / 2 + "," + height / 2 + ")");
+
+    var pieLegend = d3.select(".pie-graph")
+                        .append("div")
+                        .attr("id", "pie-legend");
+
+    pieLegend.append("i")
+            .style("background", pieColors.female)
+            .style("padding", "5px")
+            .style("color", "black")
+            .text("Female");
+
+    pieLegend.append("i")
+            .style("background", pieColors.male)
+            .style("padding", "5px")
+            .style("color", "black")
+            .text("Male");
+
+    pieLegend.append("div")
+                .html("<strong>Sex Ratio: </strong>Females for every 1000 Males")
+                .style("color", "white")
+                .style("margin-top", "5px");
+
+	var pieRadius = 60;
+
+    var arc = d3.svg.arc()
+                .outerRadius( pieRadius - 5 )
+                .innerRadius( 0 );
+
+    var pieData = [];
+
+    // initial data for Delhi
+    pieData.push( { type: "male", ratio: 1000, color: pieColors.male } );
+    pieData.push( { type: "female", ratio: 868, color: pieColors.female } );
+
+    var pie = d3.layout.pie()
+                .sort(null)
+                .value( function(d) { return d.ratio; } )
+                // realigns the sector in the circle
+                .startAngle(3*Math.PI)
+                .endAngle(1*Math.PI)
+                // enable this for half circle view
+                //.startAngle(-90 * (Math.PI/180))
+                //.endAngle(90 * (Math.PI/180))
+                ;
+
+    var piePieces = pieSvg.selectAll(".pie-piece")
+                        .data( pie(pieData) )
+                            .enter().append("g")
+                        .attr("class", "pie-piece");
+
+    piePieces.append("path")
+            .attr("d", arc)
+            .style("fill", function(d) { return d.data.color; } )
+            // the data is bound to the parent 'pie-piece' element
+            // but we need the data in the child path element for animating the arc
+            // store the oldangle data in the path element to animate the arc
+            .each( function(d) { this._oldAngle = d; } );
+
+    piePieces.append("text")
+                .attr("transform", function(d) { return "translate(" + arc.centroid(d) + ")"; } )
+                .attr("dy", ".35em")
+                .style("text-anchor", "middle")
+                .text( function(d) { return d.data.ratio; } );
+    // END: Pie Graph
+
+    // START: Bar Graph (Literacy)
+    var barWidth = 250,
+        barHeight = 180,
+        barSize = 50,
+        // attach the literacy data for 'Delhi' initially
+        literacyData = [ 86.21 ];
+
+    var barName = d3.select(".bar-graph")
+                        .append("div")
+                    .text("Delhi")
+                    .style("color", "white")
+                    .style("font-size", "15px")
+                    .style("font-weight", "bold")
+                    .style("margin", "6px 0");
+
+    var barHolder = d3.select(".bar-graph")
+                            .append("svg")
+                        .attr("id", "literacy-bar")
+                        .attr("width", barWidth)
+                        .attr("height", barHeight)
+                            .append("rect")
+                        .attr("width", barSize)
+                        .attr("height", barHeight)
+                        .attr("x", (barWidth-barSize)/2)
+                        .style("color", getLiteracyColor( literacyData[0] ) );
+
+    var barLegend = d3.select(".bar-graph")
+                            .append("div")
+                        .style("color", "white")
+                        .style("font-weight", "bold")
+                        .style("font-size", "15px")
+                        .text("Literacy: ")
+                            .append("span")
+                        .attr("id", "literacy-percent")
+                        .text(literacyData[0].toFixed(2) + "%")
+                        .style("color", getLiteracyColor( literacyData[0] ) );
+
+    var litBar = d3.select("#literacy-bar").selectAll("rect")
+                        .data( literacyData )
+                        .attr("height", function(d) {
+                            var h = barHeight*(d/100);
+                            return h;
+                        })
+                        .attr("y", function(d) {
+                            var h = barHeight*(d/100),
+                                nh = barHeight - h;
+                            return nh;
+                        })
+                        .style("fill",  function(d) { return getLiteracyColor(d); } );
+    // END: Bar Graph (Literacy)
+
+    // START: Updates both Pie Graph and Bar Graph
+    function updateGraph ( graphData ) {
+        // Update Pie Graph
+        pieData = [];
+
+        pieData.push( { type: "male", ratio: 1000, color: pieColors.male } );
+        pieData.push( { type: "female", ratio: graphData.sexratio, color: pieColors.female } );
+
+        // update pie
+        var pieUpdate = pieSvg.selectAll(".pie-piece")
+                                // bind the new updated data
+                                .data( pie(pieData) );
+        // update pie arc
+        pieUpdate.select("path")
+                    .transition().delay(300).attrTween("d", function(d) {
+                        // we have stored the angle data in path element in _oldAngle
+                        var i = d3.interpolate( this._oldAngle, d );
+                        // update the old angle data with current angle data
+                        this._oldAngle = i(0);
+                        //return a functor
+                        return function(t) {
+                            return arc( i(t) );
+                        }
+                    });
+        // update pie text
+        pieUpdate.select("text")
+                .attr("transform", function(d) { return "translate(" + arc.centroid(d) + ")"; } )
+                .attr("dy", ".35em")
+                .style("text-anchor", "middle")
+                .text( function(d) { return d.data.ratio; } );
+        // update state name in pie graph
+        pieName.text( graphData.name );
+
+        // Update Bar Graph
+        barName.text( graphData.name );
+
+        literacyData = [];
+        literacyData.push( +graphData.literacy );
+
+        d3.select("#literacy-bar").selectAll("rect")
+                        .data( literacyData )
+                        .transition().duration(500)
+                        .attr("height", function(d) {
+                            var h = barHeight*(d/100);
+                            return h;
+                        })
+                        .attr("y", function(d) {
+                            var h = barHeight*(d/100),
+                                nh = barHeight - h;
+                            return nh;
+                        })
+                        .style("fill",  function(d) { return getLiteracyColor(d); } );
+
+        barLegend.text( graphData.literacy.toFixed(2) + "%" )
+                .transition().duration(500)
+                .style("color", getLiteracyColor(+graphData.literacy) );
+    }// END: updateChart()
+
+    function getLiteracyColor (literacy) {
+        // color from colorbrew
+        var literacyBrew = ['rgb(215,25,28)','rgb(253,174,97)','rgb(166,217,106)','rgb(26,150,65)'].reverse(),
+            literacyRange = [ 90, 80, 70, 60];
+
+        literacy = +literacy;
+
+        return literacy > literacyRange[0] ? literacyBrew[0] :
+                literacy > literacyRange[1] ? literacyBrew[1] :
+                literacy > literacyRange[2] ? literacyBrew[2] :
+                literacyBrew[3];
+    }
+
+    // draw the layer with capital markers
+    var capitalLayer;
+
+    drawCapitalMarkers();
+
+    // add the capitals toggle checkbox
+    var capitalFilter = document.getElementById("capitals-filter"),
+        capitalFilterDiv = document.getElementById("capitals-filter-div");
+
+    capitalFilter.addEventListener("change", function(){
+        this.checked ? map.addLayer(capitalLayer) : map.removeLayer(capitalLayer);
+    });
+
+    setCapitalFilterPosition();
+
+    function drawCapitalMarkers () {
+        var capitalGeoJson = [];
+
+        for (var state in indiaCensus.states) {
+            var capitalData = indiaCensus.states[state].capital;
+            // capital marker geojson data
+            capitalData.details.forEach( function ( capital, index ) {
+                // location is normally in (latitude, longitude) format
+                // but for geojson the format is  (longitude, latitude)
+                capitalGeoJson.push({
+                    "type": "Feature",
+                    "geometry": {
+                      "type": "Point",
+                      // make an array copy and reverse the co-ordinates to (long,lat) for geojson
+                      "coordinates": Array.prototype.slice.call(capital.coordinates).reverse()
+                    },
+                    "properties": {
+                      "title": capital.name,
+                      "description": capital.population ? "<strong>Population: </strong>" + capital.population : "(census data not available)",
+                      "data": capital,
+                      "marker-color": "#ffb90f",
+                      "marker-size": "small",
+                      "marker-symbol": "star"
+                    }
+                });
+            } ); // end of 'forEach'
+        } // end of 'for in'
+
+        // add the marker layer
+        capitalLayer = L.mapbox.featureLayer( capitalGeoJson ).addTo( map );
+        // open the popup on hover
+        capitalLayer.on('mouseover', function(e) {
+            e.layer.openPopup();
+            // update the graph if census details is present
+            if (e.layer.feature.properties.data.sexratio) {
+                updateGraph( e.layer.feature.properties.data );
+            }
+        });
+
+        capitalLayer.on('mouseout', function(e) {
+            e.layer.closePopup();
+        });
+    }
+
+    function setCapitalFilterPosition () {
+        var gistWidth = 960,
+            gistHeight = 707;
+        capitalFilterDiv.style.top = 0.5*gistHeight + "px";
+        capitalFilterDiv.style.left = 0.78*gistWidth + "px";
+        // adjust the defalut gist preview height
+        d3.select(self.frameElement).style("height", gistHeight + "px");
+    }
+
+</script>
+
+<!--data-->
+<script>
+    var stateCensus = {
+
+	"UP": {
+
+		"name": "Uttar Pradesh",
+		"capital": {
+			"name": "Lucknow",
+			"details": [
+				{
+					"name": "Lucknow",
+					"coordinates": [ 26.846511, 80.946683 ],
+					"population": "2,901,474",
+					"sexratio": 915,
+					"literacy": 84.72
+				}
+			]
+		},
+		"population": "199,812,341",
+		"growth": 20.23,
+		"area": 240928,
+		"density": 829,
+		"sexratio": 912,
+		"literacy": 67.68
+
+	},
+
+	"MH": {
+
+		"name": "Maharashtra",
+		"capital": {
+			"name": "Mumbai",
+			"details": [
+				{
+					"name": "Mumbai",
+					"coordinates": [ 19.075984, 72.877656 ],
+					"population": "18,414,288",
+					"sexratio": 852,
+					"literacy": 90.28
+				}
+			]
+		},
+		"population": "112,374,333",
+		"growth": 15.99,
+		"area": 307713,
+		"density": 365,
+		"sexratio": 929,
+		"literacy": 82.34
+
+	},
+
+	"BR": {
+
+		"name": "Bihar",
+		"capital": {
+			"name": "Patna",
+			"details": [
+				{
+					"name": "Patna",
+					"coordinates": [ 25.611000, 85.144000 ],
+					"population": "2,046,652",
+					"sexratio": 882,
+					"literacy": 84.71
+				}
+			]
+		},
+		"population": "104,099,452",
+		"growth": 25.42,
+		"area": 94163,
+		"density": 1106,
+		"sexratio": 918,
+		"literacy": 61.80
+
+	},
+
+	"WB": {
+
+		"name": "West Bengal",
+		"capital": {
+			"name": "Kolkata",
+			"details": [
+				{
+					"name": "Kolkata",
+					"coordinates": [ 22.572646, 88.363895 ],
+					"population": "14,112,536",
+					"sexratio": 899,
+					"literacy": 87.14
+				}
+			]
+		},
+		"population": "91,276,115",
+		"growth": 13.84,
+		"area": 88752,
+		"density": 1028,
+		"sexratio": 950,
+		"literacy": 76.26
+
+	},
+
+	"AP": {
+
+		"name": "Andhra Pradesh",
+		"capital": {
+			"name": "Hyderabad",
+			"details": [
+				{
+					"name": "Hyderabad",
+					"coordinates": [ 17.385044, 78.486671 ],
+					"population": "7,749,334",
+					"sexratio": 945,
+					"literacy": 82.96
+				}
+			]
+		},
+		"population": "84,580,777",
+		"growth": 10.98,
+		"area": 275045,
+		"density": 308,
+		"sexratio": 993,
+		"literacy": 67.02
+
+	},
+
+	"MP": {
+
+		"name": "Madhya Pradesh",
+		"capital": {
+			"name": "Bhopal",
+			"details": [
+				{
+					"name": "Bhopal",
+					"coordinates": [ 23.259933, 77.412615 ],
+					"population": "1,883,381",
+					"sexratio": 911,
+					"literacy": 85.24
+				}
+			]
+		},
+		"population": "72,626,809",
+		"growth": 20.35,
+		"area": 308252,
+		"density": 236,
+		"sexratio": 931,
+		"literacy": 69.32
+
+	},
+
+	"TN": {
+
+		"name": "Tamil Nadu",
+		"capital": {
+			"name": "Chennai",
+			"details": [
+				{
+					"name": "Chennai",
+					"coordinates": [ 13.082680, 80.270718 ],
+					"population": "8,696,010",
+					"sexratio": 986,
+					"literacy": 90.33
+				}
+			]
+		},
+		"population": "72,147,030",
+		"growth": 15.61,
+		"area": 130060,
+		"density": 555,
+		"sexratio": 996,
+		"literacy": 80.09
+
+	},
+
+	"RJ": {
+
+		"name": "Rajasthan",
+		"capital": {
+			"name": "Jaipur",
+			"details": [
+				{
+					"name": "Jaipur",
+					"coordinates": [ 26.912434, 75.787271 ],
+					"population": "3,073,350",
+					"sexratio": 898,
+					"literacy": 84.34
+				}
+			]
+		},
+		"population": "68,548,437",
+		"growth": 21.31,
+		"area": 342239,
+		"density": 200,
+		"sexratio": 928,
+		"literacy": 66.11
+
+	},
+
+	"KA": {
+
+		"name": "Karnataka",
+		"capital": {
+			"name": "Bengaluru",
+			"details": [
+				{
+					"name": "Bengaluru",
+					"coordinates": [ 12.971599, 77.594563 ],
+					"population": "8,499,399",
+					"sexratio": 914,
+					"literacy": 89.59
+				}
+			]
+		},
+		"population": "61,095,297",
+		"growth": 15.60,
+		"area": 191791,
+		"density": 319,
+		"sexratio": 973,
+		"literacy": 75.36
+
+	},
+
+	"GJ": {
+
+		"name": "Gujarat",
+		"capital": {
+			"name": "Gandhinagar",
+			"details": [
+				{
+					"name": "Gandhinagar",
+					"coordinates": [ 23.215635, 72.636941 ],
+					"population": "208,299",
+					"sexratio": 903,
+					"literacy": 93.70
+				}
+			]
+		},
+		"population": "60,439,692",
+		"growth": 19.28,
+		"area": 196244,
+		"density": 308,
+		"sexratio": 919,
+		"literacy": 78.03
+
+	},
+
+	"OR": {
+
+		"name": "Odisha",
+		"capital": {
+			"name": "Bhubaneshwar",
+			"details": [
+				{
+					"name": "Bhubaneshwar",
+					"coordinates": [ 20.296059, 85.824540 ],
+					"population": "881,988",
+					"sexratio": 882,
+					"literacy": 93.15
+				}
+			]
+		},
+		"population": "41,974,218",
+		"growth": 14.05,
+		"area": 155707,
+		"density": 270,
+		"sexratio": 979,
+		"literacy": 72.87
+
+	},
+
+	"KL": {
+
+		"name": "Kerala",
+		"capital": {
+			"name": "Thiruvanandhapuram",
+			"details": [
+				{
+					"name": "Thiruvanandhapuram",
+					"coordinates": [ 8.524139, 76.936638 ],
+					"population": "1,687,406",
+					"sexratio": 1064,
+					"literacy": 93.72
+				}
+			]
+		},
+		"population": "33,406,061",
+		"growth": 4.91,
+		"area": 38852,
+		"density": 860,
+		"sexratio": 1084,
+		"literacy": 94.00
+
+	},
+
+	"JH": {
+
+		"name": "Jharkhand",
+		"capital": {
+			"name": "Ranchi",
+			"details": [
+				{
+					"name": "Ranchi",
+					"coordinates": [ 23.344100, 85.309562 ],
+					"population": "1,126,741",
+					"sexratio": 920,
+					"literacy": 88.49
+				}
+			]
+		},
+		"population": "32,988,134",
+		"growth": 22.42,
+		"area": 79716,
+		"density": 414,
+		"sexratio": 948,
+		"literacy": 66.41
+
+	},
+
+	"AS": {
+
+		"name": "Assam",
+		"capital": {
+			"name": "Dispur",
+			"details": [
+				{
+					"name": "Dispur",
+					"coordinates": [ 26.140833, 91.790833 ]
+				}
+			]
+		},
+		"population": "31,205,576",
+		"growth": 17.07,
+		"area": 78438,
+		"density": 398,
+		"sexratio": 958,
+		"literacy": 72.19
+
+	},
+
+	"PB": {
+
+		"name": "Punjab",
+		"capital": {
+			"name": "Chandigarh",
+			"details": [
+				{
+					"name": "Chandigarh",
+					"coordinates": [ 30.733315, 76.779418 ],
+					"population": "1,025,682",
+					"sexratio": 829,
+					"literacy": 86.77
+				}
+			]
+		},
+		"population": "27,743,338",
+		"growth": 13.89,
+		"area": 50362,
+		"density": 551,
+		"sexratio": 895,
+		"literacy": 75.84
+
+	},
+
+	"CT": {
+
+		"name": "Chhattisgarh",
+		"capital": {
+			"name": "Raipur",
+			"details": [
+				{
+					"name": "Raipur",
+					"coordinates": [ 21.251384, 81.629641 ],
+					"population": "1,122,555",
+					"sexratio": 945,
+					"literacy": 86.90
+				}
+			]
+		},
+		"population": "25,545,198",
+		"growth": 22.61,
+		"area": 135192,
+		"density": 189,
+		"sexratio": 991,
+		"literacy": 70.28
+
+	},
+
+	"HR": {
+
+		"name": "Haryana",
+		"capital": {
+			"name": "Chandigarh",
+			"details": [
+				{
+					"name": "Chandigarh",
+					"coordinates": [ 30.733315, 76.779418 ],
+					"population": "1,025,682",
+					"sexratio": 829,
+					"literacy": 86.77
+				}
+			]
+		},
+		"population": "25,351,462",
+		"growth": 19.90,
+		"area": 44212,
+		"density": 573,
+		"sexratio": 879,
+		"literacy": 75.55
+
+	},
+
+	"DL": {
+
+		"name": "Delhi",
+		"capital": {
+			"name": "Delhi",
+			"details": [
+				{
+					"name": "Delhi",
+					"coordinates": [ 28.613939, 77.209021 ],
+					"population": "16,314,838",
+					"sexratio": 875,
+					"literacy": 87.60
+				}
+			]
+		},
+		"population": "16,787,941",
+		"growth": 21.21,
+		"area": 1483,
+		"density": 11320,
+		"sexratio": 868,
+		"literacy": 86.21
+
+	},
+
+	"JK": {
+
+		"name": "Jammu and Kashmir",
+		"capital": {
+			"name": "Srinagar(summer), Jammu(winter)",
+			"details": [
+				{
+					"name": "Srinagar (summer)",
+					"coordinates": [ 34.083658, 74.797368 ],
+					"population": "1,273,312",
+					"sexratio": 888,
+					"literacy": 70.98
+				},
+				{
+					"name": "Jammu (winter)",
+					"coordinates": [ 32.726602, 74.857026 ],
+					"population": "651,826",
+					"sexratio": 898,
+					"literacy": 89.66
+				}
+			]
+		},
+		"population": "12,541,302",
+		"growth": 23.64,
+		"area": 222236,
+		"density": 56,
+		"sexratio": 889,
+		"literacy": 67.16
+
+	},
+
+	"UT": {
+
+		"name": "Uttarakhand",
+		"capital": {
+			"name": "Dehradun",
+			"details": [
+				{
+					"name": "Dehradun",
+					"coordinates": [ 30.316495, 78.032192 ],
+					"population": "714,223",
+					"sexratio": 906,
+					"literacy": 89.32
+				}
+			]
+		},
+		"population": "10,086,292",
+		"growth": 18.81,
+		"area": 53483,
+		"density": 189,
+		"sexratio": 963,
+		"literacy": 78.82
+
+	},
+
+	"HP": {
+
+		"name": "Himachal Pradesh",
+		"capital": {
+			"name": "Shimla",
+			"details": [
+				{
+					"name": "Shimla",
+					"coordinates": [ 31.104814, 77.173403 ],
+					"population": "171,817",
+					"sexratio": 818,
+					"literacy": 94.67
+				}
+			]
+		},
+		"population": "6,864,602",
+		"growth": 12.94,
+		"area": 55673,
+		"density": 123,
+		"sexratio": 972,
+		"literacy": 82.80
+
+	},
+
+	"TR": {
+
+		"name": "Tripura",
+		"capital": {
+			"name": "Agartala",
+			"details": [
+				{
+					"name": "Agartala",
+					"coordinates": [ 23.831457, 91.286778 ],
+					"population": "399,688",
+					"sexratio": 1002,
+					"literacy": 93.88
+				}
+			]
+		},
+		"population": "3,673,917",
+		"growth": 14.84,
+		"area": 10486,
+		"density": 350,
+		"sexratio": 960,
+		"literacy": 87.22
+
+	},
+
+	"ML": {
+
+		"name": "Meghalaya",
+		"capital": {
+			"name": "Shillong",
+			"details": [
+				{
+					"name": "Shillong",
+					"coordinates": [ 25.578773, 91.893254 ],
+					"population": "354,325",
+					"sexratio": 1042,
+					"literacy": 92.34
+				}
+			]
+		},
+		"population": "2,966,889",
+		"growth": 27.95,
+		"area": 22429,
+		"density": 132,
+		"sexratio": 989,
+		"literacy": 74.43
+
+	},
+
+	"MN": {
+
+		"name": "Manipur",
+		"capital": {
+			"name": "Imphal",
+			"details": [
+				{
+					"name": "Imphal",
+					"coordinates": [ 24.820000, 93.950000 ],
+					"population": "414,288",
+					"sexratio": 1055,
+					"literacy": 91.70
+				}
+			]
+		},
+		"population": "2,570,390",
+		"growth": 12.05,
+		"area": 22327,
+		"density": 115,
+		"sexratio": 992,
+		"literacy": 79.21
+
+	},
+
+	"NL": {
+
+		"name": "Nagaland",
+		"capital": {
+			"name": "Kohima",
+			"details": [
+				{
+					"name": "Kohima",
+					"coordinates": [ 25.670100, 94.107700 ]
+				}
+			]
+		},
+		"population": "1,978,502",
+		"growth": -0.58,
+		"area": 16579,
+		"density": 119,
+		"sexratio": 931,
+		"literacy": 79.55
+
+	},
+
+	"GA": {
+
+		"name": "Goa",
+		"capital": {
+			"name": "Panaji",
+			"details": [
+				{
+					"name": "Panaji",
+					"coordinates": [ 15.490930, 73.827850 ]
+				}
+			]
+		},
+		"population": "1,458,545",
+		"growth": 8.23,
+		"area": 3702,
+		"density": 394,
+		"sexratio": 973,
+		"literacy": 88.70
+
+	},
+
+	"AR": {
+
+		"name": "Arunachal Pradesh",
+		"capital": {
+			"name": "Itanagar",
+			"details": [
+				{
+					"name": "Itanagar",
+					"coordinates": [ 27.084368, 93.605316 ]
+				}
+			]
+		},
+		"population": "1,383,727",
+		"growth": 26.03,
+		"area": 83743,
+		"density": 17,
+		"sexratio": 938,
+		"literacy": 65.38
+
+	},
+
+	"PY": {
+
+		"name": "Puducherry",
+		"capital": {
+			"name": "Puducherry",
+			"details": [
+				{
+					"name": "Puducherry",
+					"coordinates": [ 11.913860, 79.814472 ],
+					"population": "654,392",
+					"sexratio": 1045,
+					"literacy": 89.29
+				}
+			]
+		},
+		"population": "1,247,953",
+		"growth": 28.08,
+		"area": 490,
+		"density": 2547,
+		"sexratio": 1037,
+		"literacy": 85.85
+
+	},
+
+	"MZ": {
+
+		"name": "Mizoram",
+		"capital": {
+			"name": "Aizawl",
+			"details": [
+				{
+					"name": "Aizawl",
+					"coordinates": [ 23.727107, 92.717639 ],
+					"population": "291,822",
+					"sexratio": 1029,
+					"literacy": 98.80
+				}
+			]
+		},
+		"population": "1,097,206",
+		"growth": 23.48,
+		"area": 21081,
+		"density": 52,
+		"sexratio": 976,
+		"literacy": 91.33
+
+	},
+
+	"CH": {
+
+		"name": "Chandigarh",
+		"capital": {
+			"name": "Chandigarh",
+			"details": [
+				{
+					"name": "Chandigarh",
+					"coordinates": [ 30.733315, 76.779418 ],
+					"population": "1,025,682",
+					"sexratio": 829,
+					"literacy": 86.77
+				}
+			]
+		},
+		"population": "1,055,450",
+		"growth": 17.19,
+		"area": 114,
+		"density": 9258,
+		"sexratio": 818,
+		"literacy": 86.05
+
+	},
+
+	"SK": {
+
+		"name": "Sikkim",
+		"capital": {
+			"name": "Gangtok",
+			"details": [
+				{
+					"name": "Gangtok",
+					"coordinates": [ 27.338936, 88.606504 ]
+				}
+			]
+		},
+		"population": "610,577",
+		"growth": 12.89,
+		"area": 7096,
+		"density": 86,
+		"sexratio": 890,
+		"literacy": 81.42
+
+	},
+
+	"AN": {
+
+		"name": "Andaman and Nicobar Islands",
+		"capital": {
+			"name": "Port Blair",
+			"details": [
+				{
+					"name": "Port Blair",
+					"coordinates": [ 11.623377, 92.726483 ],
+					"population": "100,608",
+					"sexratio": 889,
+					"literacy": 89.76
+				}
+			]
+		},
+		"population": "380,581",
+		"growth": 6.86,
+		"area": 8249,
+		"density": 46,
+		"sexratio": 876,
+		"literacy": 86.63
+
+	},
+
+	"DN": {
+
+		"name": "Dadra and Nagar Haveli",
+		"capital": {
+			"name": "Silvassa",
+			"details": [
+				{
+					"name": "Silvassa",
+					"coordinates": [ 20.276266, 73.008306 ]
+				}
+			]
+		},
+		"population": "343,709",
+		"growth": 55.88,
+		"area": 491,
+		"density": 700,
+		"sexratio": 774,
+		"literacy": 76.24
+
+	},
+
+	"DD": {
+
+		"name": "Daman and Diu",
+		"capital": {
+			"name": "Daman",
+			"details": [
+				{
+					"name": "Daman",
+					"coordinates": [ 20.397374, 72.832799 ]
+				}
+			]
+		},
+		"population": "243,247",
+		"growth": 53.76,
+		"area": 111,
+		"density": 2191,
+		"sexratio": 618,
+		"literacy": 87.10
+
+	},
+
+	"LD": {
+
+		"name": "Lakshadweep",
+		"capital": {
+			"name": "Kavaratti",
+			"details": [
+				{
+					"name": "Kavaratti",
+					"coordinates": [ 10.559320, 72.635813 ]
+				}
+			]
+		},
+		"population": "64,473",
+		"growth": 6.30,
+		"area": 30,
+		"density": 2149,
+		"sexratio": 946,
+		"literacy": 91.85
+
+	}
+
+};
+
+// assign the data
+var indiaCensus = {
+
+	states: stateCensus
+
+};
+</script>
+
+</body>
+</html>

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Add a family member{% endblock %}
+
+{% block style %}
+    <style>
+table {
+    font-family: arial, sans-serif;
+    border-collapse: collapse;
+    width: 100%;
+}
+
+td, th {
+    border: 1px solid #dddddd;
+    text-align: left;
+    padding: 8px;
+}
+
+tr:nth-child(even) {
+    background-color: #dddddd;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+    <h1>List of members added</h1>
+
+    <table>
+  <tr>
+    <th>First Name</th>
+    <th>Last Name</th>
+    <th>Sex</th>
+      <th>Request Status</th>
+  </tr>
+        {% for mem in memlist %}
+  <tr>
+    <td>{{ mem.first_name }}</td>
+    <td>{{ mem.last_name }}</td>
+    <td>{{ mem.sex }}</td>
+    <td>{{ mem.request_status }}</td>
+  </tr>
+        {% endfor %}
+
+</table>
+    <a href="/memberadd"><button>Add More</button></a>
+{% endblock %}
